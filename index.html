@@ -144,25 +144,54 @@
     }
   };
 
-  // Cada tab/sesion, una vez que ve una cuenta de un tipo, se queda con esa
-  // (no rota cada vez que la vuelve a abrir en la misma visita).
+  // ---- Datos que manda Valentina en el enlace ----
+  //   ?tel=58412...        -> identifica al cliente (para saber qué método elige y darle siempre la misma cuenta)
+  //   ?metodo=Zelle        -> abre ese método de una vez (los demás siguen visibles)
+  //   ?compra=RES-...      -> (opcional) compra ya creada, p. ej. reservas de experiencias
+  function normalizarTelWa(t){
+    if(!t) return null;
+    let d = t.replace(/\D/g,'');
+    if(!d) return null;
+    if(d.startsWith('0')) d = '58' + d.slice(1);
+    else if(!d.startsWith('58')) d = '58' + d;
+    return d;
+  }
+  const params = new URLSearchParams(window.location.search);
+  const telWa = normalizarTelWa(params.get('tel'));
+  const compraId = params.get('compra') || null;
+  const metodoInicial = params.get('metodo') || null;
+
+  function esc(s){
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+  function norm(s){
+    return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'');
+  }
+
+  // Respaldo por pestaña: si el servidor no responde, se muestra la última cuenta vista.
   function claveSesion(tipo){ return `metodo_pago_sesion_${tipo}`; }
+  function leerSesion(tipo){
+    try{ const g = sessionStorage.getItem(claveSesion(tipo)); return g ? JSON.parse(g) : null; }catch(_){ return null; }
+  }
+  function guardarSesion(tipo, data){
+    try{ sessionStorage.setItem(claveSesion(tipo), JSON.stringify(data)); }catch(_){}
+  }
 
   function iconoTipo(tipo){
     return { 'Pago Móvil':'📱', 'Zelle':'💵', 'Binance':'🟡', 'PayPal':'🅿️', 'Zinli':'🔷' }[tipo] || '💳';
   }
 
-  function renderCampos(contBody, data){
+  function renderCampos(contBody, data, tipo){
     const camposHtml = (data.campos || []).map((c, i) => `
       <div class="campo-copiar" data-valor="${encodeURIComponent(c.valor)}" data-idx="${i}">
         <div class="txt">
-          <div class="etq">${c.etiqueta}</div>
-          <div class="val">${c.valor}</div>
+          <div class="etq">${esc(c.etiqueta)}</div>
+          <div class="val">${esc(c.valor)}</div>
         </div>
         <div class="icono">⧉</div>
       </div>
     `).join('');
-    const notaHtml = data.nota ? `<div class="nota">📌 ${data.nota}</div>` : '';
+    const notaHtml = data.nota ? `<div class="nota">📌 ${esc(data.nota)}</div>` : '';
     contBody.innerHTML = camposHtml + notaHtml;
 
     contBody.querySelectorAll('.campo-copiar').forEach(el => {
@@ -182,29 +211,44 @@
         const original = icono.textContent;
         icono.textContent = '✅';
         setTimeout(() => { el.classList.remove('copiado'); icono.textContent = original; }, 1200);
+
+        // Avisar que copió un dato de este método (no bloquea nada si falla)
+        if(telWa){ sb.rpc('fn_marcar_copia_metodo_pago', { p_tel_wa: telWa, p_tipo: tipo }); }
       });
     });
   }
 
-  async function abrirTipo(item, tipo, contBody){
-    // ¿Ya se le mostró una cuenta de este tipo en esta visita? -> mostrar la misma, sin rotar de nuevo.
-    let guardado = null;
-    try{ guardado = sessionStorage.getItem(claveSesion(tipo)); }catch(_){}
-    if(guardado){
-      renderCampos(contBody, JSON.parse(guardado));
+  async function abrirTipo(tipo, contBody){
+    const guardado = leerSesion(tipo);
+
+    // Sin teléfono en el enlace no hay a quién asignarle la cuenta:
+    // se muestra la misma de esta visita para no gastar la rotación cada vez que abre el método.
+    if(!telWa && guardado){
+      renderCampos(contBody, guardado, tipo);
       return;
     }
 
-    contBody.innerHTML = `<p class="cargando">Cargando datos…</p>`;
-    const { data, error } = await sb.rpc('fn_obtener_metodo_pago_rotado', { p_tipo: tipo });
+    if(guardado) renderCampos(contBody, guardado, tipo);
+    else contBody.innerHTML = `<p class="cargando">Cargando datos…</p>`;
+
+    // Con teléfono: cada vez que abre un método se registra que ese es el que eligió.
+    // El servidor le devuelve siempre la misma cuenta de ese método (no rota entre aperturas).
+    const { data, error } = await sb.rpc('fn_obtener_metodo_pago_rotado', {
+      p_tipo: tipo,
+      p_tel_wa: telWa,
+      p_compra_id: compraId
+    });
 
     if(error || !data || data.ok === false){
-      contBody.innerHTML = `<p class="error-item">No pudimos cargar los datos de ${tipo}. Vuelve a intentar en unos segundos.</p>`;
+      if(!guardado){
+        contBody.innerHTML = `<p class="error-item">No pudimos cargar los datos de ${esc(tipo)}. Vuelve a intentar en unos segundos.</p>`;
+      }
       return;
     }
 
-    try{ sessionStorage.setItem(claveSesion(tipo), JSON.stringify(data)); }catch(_){}
-    renderCampos(contBody, data);
+    const cambio = !guardado || data.id !== guardado.id;
+    guardarSesion(tipo, data);
+    if(cambio) renderCampos(contBody, data, tipo);
   }
 
   (async () => {
@@ -217,9 +261,9 @@
     }
 
     cont.innerHTML = tipos.map(t => `
-      <div class="item" data-tipo="${t.tipo}">
+      <div class="item" data-tipo="${esc(t.tipo)}">
         <div class="item-header">
-          <span class="nombre">${iconoTipo(t.tipo)} ${t.tipo}</span>
+          <span class="nombre">${iconoTipo(t.tipo)} ${esc(t.tipo)}</span>
           <span class="flecha">▾</span>
         </div>
         <div class="item-body"></div>
@@ -230,18 +274,20 @@
       const header = item.querySelector('.item-header');
       const body = item.querySelector('.item-body');
       const tipo = item.dataset.tipo;
-      let cargado = false;
       header.addEventListener('click', async () => {
         const abrir = !item.classList.contains('abierto');
         // Un solo acordeón abierto a la vez, para que no se vea desordenado.
         cont.querySelectorAll('.item.abierto').forEach(otro => { if(otro !== item) otro.classList.remove('abierto'); });
         item.classList.toggle('abierto', abrir);
-        if(abrir && !cargado){
-          cargado = true;
-          await abrirTipo(item, tipo, body);
-        }
+        if(abrir) await abrirTipo(tipo, body);
       });
     });
+
+    // Si el enlace trae ?metodo=..., ese método queda abierto de entrada (los demás siguen ahí por si cambia de opinión).
+    if(metodoInicial){
+      const objetivo = Array.from(cont.querySelectorAll('.item')).find(i => norm(i.dataset.tipo) === norm(metodoInicial));
+      if(objetivo) objetivo.querySelector('.item-header').click();
+    }
   })();
 </script>
 </body>
