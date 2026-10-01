@@ -40,6 +40,32 @@
   }
   .sub{ color:#5b5648; font-size:0.98rem; margin:0 0 30px; max-width:42ch; }
 
+  /* Cuenta regresiva (solo aparece en reservas de eventos/experiencias) */
+  .banner{
+    display:none;
+    margin:0 0 22px;
+    padding:13px 16px;
+    border-radius:8px;
+    background:#fbf3e6;
+    border:1.5px solid #e6cf98;
+    color:#6b4e16;
+    font-size:0.92rem;
+  }
+  .banner.show{ display:block; }
+  .banner .reloj{
+    display:block;
+    font-family:'Fraunces',serif;
+    font-size:1.7rem;
+    font-weight:600;
+    color:var(--moss-900);
+    letter-spacing:0.02em;
+    margin-top:2px;
+  }
+  .banner.urgente{ background:#fbe9e5; border-color:#e3b3a8; color:#8a3b2c; }
+  .banner.urgente .reloj{ color:#8a3b2c; }
+  .banner.vencida{ background:#fbe9e5; border-color:#e3b3a8; color:#8a3b2c; }
+  .banner a{ color:inherit; font-weight:600; }
+
   .acordeon{ display:flex; flex-direction:column; gap:12px; }
   .item{
     background:var(--paper);
@@ -112,6 +138,8 @@
   <h1>Nuestros datos de pago</h1>
   <p class="sub">Toca el método que vas a usar y luego toca cada dato para copiarlo.</p>
 
+  <div class="banner" id="banner"></div>
+
   <div class="acordeon" id="acordeon">
     <p class="cargando" id="cargandoTipos">Cargando métodos disponibles…</p>
   </div>
@@ -147,7 +175,8 @@
   // ---- Datos que manda Valentina en el enlace ----
   //   ?tel=58412...        -> identifica al cliente (para saber qué método elige y darle siempre la misma cuenta)
   //   ?metodo=Zelle        -> abre ese método de una vez (los demás siguen visibles)
-  //   ?compra=RES-...      -> (opcional) compra ya creada, p. ej. reservas de experiencias
+  //   ?compra=RES-...      -> (opcional) compra ya creada. Si es una RESERVA de evento/experiencia
+  //                           pendiente de pago, se muestra la cuenta regresiva; si ya venció, se bloquea.
   function normalizarTelWa(t){
     if(!t) return null;
     let d = t.replace(/\D/g,'');
@@ -161,11 +190,64 @@
   const compraId = params.get('compra') || null;
   const metodoInicial = params.get('metodo') || null;
 
+  const WHATSAPP_VALENTINA = "https://wa.me/584221482602";
+
   function esc(s){
     return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
   function norm(s){
     return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'');
+  }
+
+  // ---- Cuenta regresiva de reservas ----
+  // El tiempo restante lo calcula el servidor (fn_estado_reserva) a partir de la hora real de la reserva,
+  // así que recargar la página no reinicia el reloj.
+  function mostrarVencida(){
+    const b = document.getElementById('banner');
+    b.className = 'banner show vencida';
+    b.innerHTML = `⏱️ <strong>El tiempo para pagar esta reserva terminó</strong> y el cupo se liberó. ` +
+                  `Escríbele a <a href="${WHATSAPP_VALENTINA}" target="_blank" rel="noopener">Valentina</a> para volver a reservar.`;
+    document.getElementById('acordeon').style.display = 'none';
+  }
+
+  function fmtReloj(seg){
+    const m = Math.floor(seg / 60), s = seg % 60;
+    return String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+  }
+
+  function iniciarContador(segundos){
+    const b = document.getElementById('banner');
+    const fin = Date.now() + segundos * 1000;
+    b.className = 'banner show';
+    b.innerHTML = `⏱️ Tu cupo está apartado. Tiempo para pagar:<span class="reloj" id="reloj"></span>`;
+    const reloj = document.getElementById('reloj');
+    const tick = () => {
+      const resta = Math.max(0, Math.round((fin - Date.now()) / 1000));
+      reloj.textContent = fmtReloj(resta);
+      b.classList.toggle('urgente', resta <= 120);
+      if(resta <= 0){
+        clearInterval(timer);
+        mostrarVencida();
+      }
+    };
+    const timer = setInterval(tick, 1000);
+    tick();
+  }
+
+  // Devuelve false si la reserva ya venció (no hay nada que mostrar).
+  async function revisarReserva(){
+    if(!compraId) return true;
+    const { data } = await sb.rpc('fn_estado_reserva', { p_compra_id: compraId });
+    // Compra normal (no es reserva de evento), o sin respuesta: sin contador y sin bloqueo.
+    if(!data || data.ok === false) return true;
+    if(data.estado === 'vencida' || (data.estado === 'pendiente' && data.vencida)){
+      mostrarVencida();
+      return false;
+    }
+    if(data.estado === 'pendiente'){
+      iniciarContador(Number(data.segundos_restantes) || 0);
+    }
+    return true;
   }
 
   // Respaldo por pestaña: si el servidor no responde, se muestra la última cuenta vista.
@@ -253,6 +335,11 @@
 
   (async () => {
     const cont = document.getElementById('acordeon');
+
+    // Si es una reserva ya vencida, no se muestran las cuentas de pago.
+    const vigente = await revisarReserva();
+    if(!vigente) return;
+
     const { data: tipos, error } = await sb.rpc('fn_metodos_pago_tipos_activos', {});
 
     if(error || !tipos || tipos.length === 0){
