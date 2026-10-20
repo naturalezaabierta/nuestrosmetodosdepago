@@ -118,6 +118,16 @@
   }
   .error-item{ color:#8a3b2c; font-size:0.88rem; padding:6px 0 2px; }
 
+  .btn-pague{
+    display:flex; align-items:center; justify-content:center; gap:10px;
+    width:100%; margin-top:26px; padding:16px 18px;
+    background:#25d366; color:#fff; border:0; border-radius:999px;
+    font-family:'Work Sans',sans-serif; font-size:1rem; font-weight:600; text-decoration:none;
+    box-shadow:0 8px 22px rgba(37,211,102,.28);
+  }
+  .btn-pague:active{ transform:translateY(1px); }
+  .pague-ayuda{ font-size:0.85rem; color:#5b5648; text-align:center; margin:10px 4px 0; }
+
   footer{
     margin-top:44px;
     padding-top:20px;
@@ -136,12 +146,17 @@
   </svg>
 
   <h1>Nuestros datos de pago</h1>
-  <p class="sub">Toca el método que vas a usar y luego toca cada dato para copiarlo. Luego de hacer el pago envia el comprobante por el chat de Whatsapp a Valentina.</p>
+  <p class="sub">Toca el método que vas a usar y luego toca cada dato para copiarlo. Luego de hacer el pago envía el comprobante por el chat de WhatsApp a Valentina.</p>
 
   <div class="banner" id="banner"></div>
 
   <div class="acordeon" id="acordeon">
     <p class="cargando" id="cargandoTipos">Cargando métodos disponibles…</p>
+  </div>
+
+  <div id="bloquePague" style="display:none">
+    <a class="btn-pague" id="btnPague" href="#" target="_blank" rel="noopener">✅ Ya pagué · Volver con Valentina</a>
+    <p class="pague-ayuda">Se abre tu chat con Valentina. Ahí toca el clip 📎 y adjunta la captura de tu comprobante.</p>
   </div>
 
   <footer>Naturaleza Abierta</footer>
@@ -208,6 +223,7 @@
     b.innerHTML = `⏱️ <strong>El tiempo para pagar esta reserva terminó</strong> y el cupo se liberó. ` +
                   `Escríbele a <a href="${WHATSAPP_VALENTINA}" target="_blank" rel="noopener">Valentina</a> para volver a reservar.`;
     document.getElementById('acordeon').style.display = 'none';
+    const bp = document.getElementById('bloquePague'); if(bp) bp.style.display = 'none';
   }
 
   function fmtReloj(seg){
@@ -369,6 +385,11 @@
         if(abrir) await abrirTipo(tipo, body);
       });
     });
+
+    // Botón "Ya pagué": vuelve al chat con Valentina con el mensaje ya escrito.
+    const textoPague = 'Hola Valentina, ya hice mi pago ✅ Este es mi comprobante de pago 👇';
+    document.getElementById('btnPague').href = `${WHATSAPP_VALENTINA}?text=${encodeURIComponent(textoPague)}`;
+    document.getElementById('bloquePague').style.display = 'block';
 
     // Si el enlace trae ?metodo=..., ese método queda abierto de entrada (los demás siguen ahí por si cambia de opinión).
     if(metodoInicial){
