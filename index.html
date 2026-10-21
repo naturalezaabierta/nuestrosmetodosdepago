@@ -126,6 +126,11 @@
     box-shadow:0 8px 22px rgba(37,211,102,.28);
   }
   .btn-pague:active{ transform:translateY(1px); }
+  .btn-pague.bloqueado{
+    background:#d6d4c8; color:#8a8672; box-shadow:none;
+    pointer-events:none; cursor:not-allowed;
+  }
+  .btn-pague.bloqueado:active{ transform:none; }
   .pague-ayuda{ font-size:0.85rem; color:#5b5648; text-align:center; margin:10px 4px 0; }
 
   footer{
@@ -155,8 +160,8 @@
   </div>
 
   <div id="bloquePague" style="display:none">
-    <a class="btn-pague" id="btnPague" href="#" target="_blank" rel="noopener">✅ Ya pagué · Volver con Valentina</a>
-    <p class="pague-ayuda">Se abre tu chat con Valentina. Ahí toca el clip 📎 y adjunta la captura de tu comprobante.</p>
+    <a class="btn-pague bloqueado" id="btnPague" href="#" target="_blank" rel="noopener" aria-disabled="true" onclick="if(this.classList.contains('bloqueado')){return false;}">✅ Ya pagué · Volver con Valentina</a>
+    <p class="pague-ayuda" id="ayudaPague">Primero copia los datos y haz tu pago. Este botón se activa cuando copies un dato.</p>
   </div>
 
   <footer>Naturaleza Abierta</footer>
@@ -275,6 +280,18 @@
     try{ sessionStorage.setItem(claveSesion(tipo), JSON.stringify(data)); }catch(_){}
   }
 
+  // Botón "Ya pagué": nace gris y bloqueado; se activa cuando la persona copia un dato de pago.
+  function activarPague(){
+    const b = document.getElementById('btnPague');
+    if(!b || !window.hrefPague) return;
+    b.href = window.hrefPague;
+    b.classList.remove('bloqueado');
+    b.removeAttribute('aria-disabled');
+    const ayuda = document.getElementById('ayudaPague');
+    if(ayuda) ayuda.textContent = 'Se abre tu chat con Valentina. Ahí toca el clip 📎 y adjunta la captura de tu comprobante.';
+    try{ sessionStorage.setItem('pague_activo','1'); }catch(_){}
+  }
+
   function iconoTipo(tipo){
     return { 'Pago Móvil':'📱', 'Zelle':'💵', 'Binance':'🟡', 'PayPal':'🅿️', 'Zinli':'🔷' }[tipo] || '💳';
   }
@@ -309,6 +326,8 @@
         const original = icono.textContent;
         icono.textContent = '✅';
         setTimeout(() => { el.classList.remove('copiado'); icono.textContent = original; }, 1200);
+
+        activarPague();
 
         // Avisar que copió un dato de este método (no bloquea nada si falla)
         if(telWa){ sb.rpc('fn_marcar_copia_metodo_pago', { p_tel_wa: telWa, p_tipo: tipo }); }
@@ -388,8 +407,9 @@
 
     // Botón "Ya pagué": vuelve al chat con Valentina con el mensaje ya escrito.
     const textoPague = 'Hola Valentina, ya hice mi pago ✅ Este es mi comprobante de pago 👇';
-    document.getElementById('btnPague').href = `${WHATSAPP_VALENTINA}?text=${encodeURIComponent(textoPague)}`;
+    window.hrefPague = `${WHATSAPP_VALENTINA}?text=${encodeURIComponent(textoPague)}`;
     document.getElementById('bloquePague').style.display = 'block';
+    try{ if(sessionStorage.getItem('pague_activo') === '1') activarPague(); }catch(_){}
 
     // Si el enlace trae ?metodo=..., ese método queda abierto de entrada (los demás siguen ahí por si cambia de opinión).
     if(metodoInicial){
